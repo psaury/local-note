@@ -1,5 +1,6 @@
 var $ = DomRender();
 var $IsSaved = $.createState(true);
+var $RedrawList = $.createState(false);
 var DB = null;
 var CurrentDocument = null;
 
@@ -19,9 +20,12 @@ addEventListener('load', () => {
     if (!CurrentDocument) {
       CurrentDocument = CreateNewDocument();
     }
+    SetTitle(CurrentDocument.text);
     var usp = new URLSearchParams(location.search);
     usp.set('documentId', CurrentDocument.documentId);
     history.replaceState(null, '', '?' + usp.toString());
+  } else if (params.mode === 'modeListDocuments') {
+    SetTitle('List');
   }
   TopDom();
   $.mountTo(document.body);
@@ -57,14 +61,35 @@ function TopDom() {
         $.t('New');
       });
       $('a', () => {
-        if (RequireSearchParams().mode !== 'modeListDocuments') {
-          $.attr('href', CreateUrlString({ mode: 'modeListDocuments'}));
+        if (RequireSearchParams().mode == 'modeListDocuments') {
+          $.class('selected');
         }
+        $.attr('href', CreateUrlString({ mode: 'modeListDocuments'}));
         $.t('List');
       });
     });
     if (RequireSearchParams().mode === 'modeListDocuments') {
-      DocumentListDom();
+      $('div', () => {
+        $RedrawList.watch();
+        DocumentListDom(RequireDB().documents);
+        $('.empty-line');
+        $('div', () => {
+          $('.horizontal', () => {
+            $('.bold', () => {
+              $.t('Deleted');
+            });
+            $('.text-button', () => {
+              $.t('ClearAll');
+              $.event('click', () => {
+                if (confirm('Clear all deleted documents?')) {
+                  ClearDeletedDocuments();
+                }
+              });
+            });
+          });
+          DocumentListDom(RequireDB().deletedDocuments);
+        });
+      });
     } else {
       DocumentEditDom();
     }
@@ -74,24 +99,29 @@ function TopDom() {
 function DocumentEditDom() {
   $('textarea.textarea', () => {
     $.attr('autofocus');
-    $.style('width: calc(100vw - 2rch)');
-    $.style('height: calc(100vh - 3rem)');
     $.t(CurrentDocument.text);
     $.event('input', (ev) => {
-      $IsSaved.set(false);
       CurrentDocument.text = ev.target.value;
       RequireDB().documents[CurrentDocument.documentId] = CurrentDocument;
+      SetTitle(ev.target.value);
+      document.title = 'local-note: ' + ev.target.value.split('\n', 1)[0];
       ModeratedSaveDB();
     });
   });
 }
 
-function DocumentListDom() {
+function SetTitle(text) {
+  document.title = 'local-note: ' + text.split('\n', 1)[0];
+}
+
+function DocumentListDom(documents) {
   $('div', () => {
-    $('a')
+    // todo: delete-all button
   });
   $('.data-table', () => {
     $('.tr', () => {
+      $('.th', () => {
+      });
       $('.th', () => {
         $.t('documentId');
       });
@@ -105,8 +135,16 @@ function DocumentListDom() {
         $.t('text');
       });
     });
-    Sorted(Object.values(RequireDB().documents), doc => doc.createDate, -1).forEach(document => {
+    Sorted(Object.values(documents), doc => doc.createDate, -1).forEach(document => {
       $('.tr', () => {
+        $('.td', () => {
+          $('.text-button', () => {
+            $.t('×');
+            $.event('click', () => {
+              DeleteDocument(document);
+            });
+          })
+        });
         $('.td', () => {
           $('a', () => {
             $.attr('href', CreateUrlString({ mode: 'modeEditDocument', documentId: document.documentId }));
@@ -155,9 +193,9 @@ function FormatDateToShow(date) {
 function RequireDB() {
   if (!DB) {
     var json = localStorage.getItem('db');
-    DB = json ? JSON.parse(json) : {
-      documents: {},
-    };
+    DB = json ? JSON.parse(json) : {};
+    DB.documents ??= {};
+    DB.deletedDocuments ??= {};
   }
   return DB;
 }
@@ -167,12 +205,28 @@ function SaveDB() {
   $IsSaved.set(true);
 }
 
-var ModeratedSaveDB = Debounce(1, function () {
-  SaveDB();
-});
-
-function DeleteDocument(documentId) {
-  delete DB.documents[documentId];
+function ModeratedSaveDB() {
   $IsSaved.set(false);
+  ModeratedSaveDB._debounced();
+}
+
+ModeratedSaveDB._debounced = Debounce(1, SaveDB);
+
+function DeleteDocument(document) {
+  if (DB.documents[document.documentId]) {
+    delete DB.documents[document.documentId];
+    DB.deletedDocuments[document.documentId] = document;
+  } else if (DB.deletedDocuments[document.documentId]) {
+    if (confirm('Delete completely?')) {
+      delete DB.deletedDocuments[document.documentId];
+    }
+  }
   ModeratedSaveDB();
+  $RedrawList.set(!!$RedrawList.get());
+}
+
+function ClearDeletedDocuments() {
+  DB.deletedDocuments = {};
+  ModeratedSaveDB();
+  $RedrawList.set(!!$RedrawList.get());
 }
