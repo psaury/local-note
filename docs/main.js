@@ -226,6 +226,9 @@ function DeleteDocument(document) {
 }
 
 function ClearDeletedDocuments() {
+  if (!confirm('Delete completely?')) {
+    return;
+  }
   DB.deletedDocuments = {};
   ModeratedSaveDB();
   $RedrawList.set(!!$RedrawList.get());
